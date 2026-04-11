@@ -391,7 +391,7 @@ void renderMenu(SDL_Renderer *renderer)
 
 void renderDeadScreen(SDL_Renderer *renderer)
 {
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND); // pour pouvoir a traver les pixel
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND); // pour pouvoir voir a traver les pixels
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 175);
     SDL_FRect overlay = {0.0f, 0.0f, WIDTH, HEIGHT};
