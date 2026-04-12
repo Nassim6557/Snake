@@ -3,6 +3,8 @@
 #include <SDL3_image/SDL_image.h>
 #include <ctime>
 
+#include <string>
+
 #include <vector>
 
 #define WIDTH 640  // largeur
@@ -56,7 +58,7 @@ struct SnakeCell
     SDL_FRect Frect;
 };
 
-// les positions dans les Frect sont purement visuel
+// les positions dans les Frect sont purement visuelles
 // ce qui compte c'est les gridX && gridY
 
 struct Snake
@@ -91,6 +93,8 @@ struct Game
     std::vector<Apple> apples;
 
     SDL_Texture *appleTexture = nullptr;
+
+    unsigned int Score = 0;
 
     float restartCooldown = 0.0f;
 };
@@ -161,6 +165,14 @@ void drawApples(SDL_Renderer *renderer, Game &game)
     }
 }
 
+void drawScore(SDL_Renderer *renderer, Game &game)
+{
+    std::string Score = "Score: " + std::to_string(game.Score);
+
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderDebugText(renderer, WIDTH / 2, 0 + 0, Score.c_str());
+}
+
 // SNAKE
 
 void GrowSnake(Game &game, int amount)
@@ -210,7 +222,7 @@ void updateSnake(Game &game, float deltaTime)
     {
         snake.moveCooldown -= MOVE_INTERVAL;
 
-        // on save les pos avant deplacement
+        // on sauvegarde les positions avant déplacement
         snake.prevGridX = snake.gridX;
         snake.prevGridY = snake.gridY;
 
@@ -298,12 +310,32 @@ void PlaceApple(Game &game, int amount)
 
             positionTaken = false;
 
-            for (auto &apple : game.apples)
+            for (auto &cell : game.snake.SnakeBody)
             {
-                if (apple.gridX == appleX && apple.gridY == appleY) // si ya deja une pomme
+                if (cell.gridX == appleX && cell.gridY == appleY) // position deja prise par une cell du snake
                 {
                     positionTaken = true;
                     break;
+                }
+            }
+
+            if (!positionTaken)
+            {
+                for (auto &apple : game.apples)
+                {
+                    if (apple.gridX == appleX && apple.gridY == appleY) // position deja prise par une autre pomme
+                    {
+                        positionTaken = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!positionTaken)
+            {
+                if (game.snake.gridX == appleX && game.snake.gridY == appleY) // position deja prise par la tête du snake
+                {
+                    positionTaken = true;
                 }
             }
 
@@ -332,6 +364,8 @@ void RemoveApple(Game &game, Apple &_apple)
 void OnAppleIsEaten(Game &game, Apple &apple)
 {
     apple.eaten = 1;
+    game.Score++;
+
     RemoveApple(game, apple);
 
     GrowSnake(game, 1);
@@ -391,10 +425,10 @@ void renderMenu(SDL_Renderer *renderer)
 
 void renderDeadScreen(SDL_Renderer *renderer)
 {
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND); // pour pouvoir voir a traver les pixels
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND); // pour pouvoir voir à travers les pixels
 
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 175);
-    SDL_FRect overlay = {0.0f, 0.0f, WIDTH, HEIGHT};
+    SDL_FRect overlay = {0.0f, 0.0f, WIDTH + 10, HEIGHT + 10};
     SDL_RenderFillRect(renderer, &overlay);
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
@@ -422,6 +456,8 @@ void ClearGame(Game &game)
     {
         game.apples.clear();
     }
+
+    game.Score = 0;
 
     snake.CurrentState = SNAKE_STATES::RIGHT;
 
@@ -455,6 +491,7 @@ void HandleGame(Game &game, SDL_Renderer *renderer, float deltaTime)
         HandleSnakeCollision(game);
         drawSnake(renderer, snake);
         drawApples(renderer, game);
+        drawScore(renderer, game);
 
         break;
 
@@ -475,7 +512,6 @@ void HandleGame(Game &game, SDL_Renderer *renderer, float deltaTime)
         game.restartCooldown -= deltaTime;
         if (game.restartCooldown < 0)
             game.restartCooldown = 0;
-
         break;
 
     default:
@@ -593,9 +629,9 @@ int main(int argc, char *argv[])
                     SNAKE_STATES last = game.snake.queue.empty() ? game.snake.CurrentState : game.snake.queue.back();
 
                     // Si la queue est vide alors last = currentState
-                    // Sinon on prend le dernier element de queue
+                    // Sinon on prend le dernier élément de la queue
 
-                    if (game.snake.queue.size() < QUEUE_SIZE && last != SNAKE_STATES::DOWN) // Si la queue est pas remplie ET que le dernier element est different de DOWN on continue (pour eviter de pouvoir faire des demis tour )
+                    if (game.snake.queue.size() < QUEUE_SIZE && last != SNAKE_STATES::DOWN) // Si la queue n'est pas remplie ET que le dernier élément est différent de DOWN on continue (pour éviter de pouvoir faire des demi-tours)
                         game.snake.queue.push_back(SNAKE_STATES::UP);
                     break;
                 }
