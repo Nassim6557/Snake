@@ -1,16 +1,19 @@
 #include <iostream>
+#include <ctime>
+#include <string>
+#include <vector>
+
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
-#include <ctime>
+#include <SDL3_ttf/SDL_ttf.h>
 
-#include <string>
-
-#include <vector>
+#define Key 0xDEADBEEF
 
 #define WIDTH 640  // largeur
 #define HEIGHT 480 // hauteur
 
 #define APPLE_PATH "../Assets/Apple.png"
+#define FONT "../Assets/VCR_OSD_MONO_1.ttf"
 
 #define CELL_SIZE 40
 
@@ -96,25 +99,12 @@ struct Game
 
     unsigned int Score = 0;
 
+    TTF_Font *Basicfont;
+    TTF_Font *Smallfont;
+    TTF_Font *Bigfont;
+
     float restartCooldown = 0.0f;
 };
-
-// DECLARATIONS
-
-void OnAppleIsEaten(Game &game, Apple &apple);
-void GrowSnake(Game &game, int amount);
-void RemoveApple(Game &game, Apple &_apple);
-void PlaceApple(Game &game, int amount);
-void ClearGame(Game &game);
-void Restart(Game &game);
-void HandleSnakeCollision(Game &game);
-void HandleGame(Game &game, SDL_Renderer *renderer, float deltaTime);
-void drawApples(SDL_Renderer *renderer, Game &game);
-void drawSnake(SDL_Renderer *renderer, Snake &snake);
-void drawLines(SDL_Renderer *renderer);
-void updateSnake(Game &game, float deltaTime);
-void renderMenu(SDL_Renderer *renderer);
-void renderDeadScreen(SDL_Renderer *renderer);
 
 // HELPERS
 
@@ -128,7 +118,51 @@ inline float lerp(float a, float b, float t)
     return a + (b - a) * t;
 }
 
+// SCORE
+
+bool saveHighScore(int score)
+{
+    int checksum = score ^ Key;
+}
+
+int loadHighScore(int score, int checksum)
+{
+    if ((score ^ Key) == checksum)
+    {
+        // pas modif
+    }
+    else
+    {
+        // modif
+    }
+}
+
 // DRAW
+bool RenderLabel(SDL_Renderer *renderer, TTF_Font *font, std::string text, SDL_Color color, float x, float y)
+{
+    SDL_Surface *Surface = TTF_RenderText_Blended(font, text.c_str(), text.size(), color);
+
+    if (!Surface)
+    {
+        std::cerr << "TTF_RenderText_Blended error: " << SDL_GetError() << std::endl;
+        return false;
+    }
+
+    SDL_Texture *Texture = SDL_CreateTextureFromSurface(renderer, Surface);
+    SDL_DestroySurface(Surface);
+
+    if (!Texture)
+    {
+        std::cerr << "SDL_CreateTextureFromSurface error: " << SDL_GetError() << std::endl;
+        return false;
+    }
+
+    SDL_FRect Frect = {(x) - (float)Texture->w / 2, (y) - (float)Texture->h / 2, (float)Texture->w, (float)Texture->h};
+
+    bool result = SDL_RenderTexture(renderer, Texture, NULL, &Frect);
+
+    return result;
+}
 
 void drawLines(SDL_Renderer *renderer)
 {
@@ -169,8 +203,9 @@ void drawScore(SDL_Renderer *renderer, Game &game)
 {
     std::string Score = "Score: " + std::to_string(game.Score);
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDebugText(renderer, WIDTH / 2, 0 + 0, Score.c_str());
+    SDL_Color color = {255, 255, 255, 255};
+
+    RenderLabel(renderer, game.Basicfont, Score, color, WIDTH / 2.0f, 30.0f);
 }
 
 // SNAKE
@@ -415,14 +450,6 @@ void HandleSnakeCollision(Game &game)
 
 // RENDER
 
-void renderMenu(SDL_Renderer *renderer)
-{
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDebugText(renderer, WIDTH / 2, HEIGHT / 2, "MENU");
-    SDL_RenderDebugText(renderer, 100, 100, "Snake Game");
-    SDL_RenderDebugText(renderer, 200, 200, "Press Enter to start");
-}
-
 void renderDeadScreen(SDL_Renderer *renderer)
 {
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND); // pour pouvoir voir à travers les pixels
@@ -437,6 +464,25 @@ void renderDeadScreen(SDL_Renderer *renderer)
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
+void renderMenu(SDL_Renderer *renderer, Game &game)
+{
+    SDL_SetRenderDrawColor(renderer, 10, 10, 10, 255);
+    SDL_RenderClear(renderer);
+
+    SDL_Color green = {74, 222, 128, 255};
+    SDL_Color greenDark = {22, 163, 74, 255};
+    SDL_Color white = {255, 255, 255, 80};
+
+    RenderLabel(renderer, game.Bigfont, "SNAKE", green,
+                WIDTH / 2.0f, HEIGHT / 2.0f - 120.0f);
+
+    SDL_SetRenderDrawColor(renderer, 22, 163, 74, 255);
+    SDL_FRect line = {WIDTH / 2.0f - 40, HEIGHT / 2.0f - 95, 80, 2};
+    SDL_RenderFillRect(renderer, &line);
+
+    RenderLabel(renderer, game.Smallfont, "PRESS ENTER TO PLAY", white,
+                WIDTH / 2.0f, HEIGHT - 50.0f);
+}
 // GAME
 
 void ClearGame(Game &game)
@@ -496,7 +542,7 @@ void HandleGame(Game &game, SDL_Renderer *renderer, float deltaTime)
         break;
 
     case GAME_STATES::IN_MENU:
-        renderMenu(renderer);
+        renderMenu(renderer, game);
 
         game.restartCooldown -= deltaTime;
         if (game.restartCooldown < 0)
@@ -530,7 +576,7 @@ int main(int argc, char *argv[])
 
     bool running = true;
 
-    if (!SDL_Init(SDL_INIT_VIDEO))
+    if (!SDL_Init(SDL_INIT_VIDEO) || !TTF_Init())
     {
         SDL_LogError(SDL_LOG_CATEGORY_ERROR, "Init Error: %s\n", SDL_GetError());
         return 1;
@@ -550,10 +596,31 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    TTF_Font *BigFont = TTF_OpenFont(FONT, 30.0f);
+    TTF_Font *BasicFont = TTF_OpenFont(FONT, 22.0f);
+    TTF_Font *SmallFont = TTF_OpenFont(FONT, 15.0f);
+
+    if (!BigFont)
+    {
+        SDL_Log("Failed to load font: %s", SDL_GetError());
+    }
+    if (!BasicFont)
+    {
+        SDL_Log("Failed to load font: %s", SDL_GetError());
+    }
+    if (!SmallFont)
+    {
+        SDL_Log("Failed to load font: %s", SDL_GetError());
+    }
+
     SDL_SetRenderVSync(renderer, 1);
 
     // SDL_Surface *WindowSurface = SDL_GetWindowSurface(window);
     Game game;
+
+    game.Bigfont = BigFont;
+    game.Basicfont = BasicFont;
+    game.Smallfont = SmallFont;
 
     SDL_Surface *surface = IMG_Load(APPLE_PATH);
     game.appleTexture = SDL_CreateTextureFromSurface(renderer, surface);
