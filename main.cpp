@@ -7,13 +7,17 @@
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
+#include <sstream>
+#include <fstream>
+
 #define Key 0xDEADBEEF
 
 #define WIDTH 640  // largeur
 #define HEIGHT 480 // hauteur
 
 #define APPLE_PATH "../Assets/Apple.png"
-#define FONT "../Assets/VCR_OSD_MONO_1.ttf"
+#define FONT_PATH "../Assets/VCR_OSD_MONO_1.ttf"
+#define DATA_PATH "../data.dat"
 
 #define CELL_SIZE 40
 
@@ -51,8 +55,22 @@ enum class SNAKE_STATES
     DOWN
 };
 
-// STRUCTS
+// HELPERS
 
+inline bool checkGridCollision(int ax, int ay, int bx, int by)
+{
+    return ax == bx && ay == by;
+}
+
+inline float _lerp(float a, float b, float t)
+{
+    return a + (b - a) * t;
+}
+
+class Game;
+class Snake;
+
+// STRUCTS
 struct SnakeCell
 {
     int gridX = 0, gridY = 0;
@@ -61,80 +79,599 @@ struct SnakeCell
     SDL_FRect Frect;
 };
 
-// les positions dans les Frect sont purement visuelles
-// ce qui compte c'est les gridX && gridY
-
-struct Snake
-{
-    int gridX = STARTING_X, gridY = STARTING_Y;
-    int prevGridX = STARTING_X, prevGridY = STARTING_Y;
-
-    SDL_FRect Frect = {(float)STARTING_X, (float)STARTING_Y, SNAKE_WIDTH, SNAKE_HEIGHT};
-
-    SNAKE_STATES CurrentState = SNAKE_STATES::RIGHT;
-
-    std::vector<SNAKE_STATES> queue;
-    std::vector<SnakeCell> SnakeBody;
-
-    float moveCooldown = 0;
-};
-
 struct Apple
 {
     int gridX = 0;
     int gridY = 0;
     int ID = 0;
-
-    bool eaten = 0;
 };
 
-struct Game
+// les positions dans les Frect sont purement visuelles
+// ce qui compte c'est les gridX && gridY
+
+class Snake
 {
+public:
+    Snake() {};
+
+    void Tick(float deltaTime);
+    void grow(int amount);
+
+    bool CheckWallCollision(); // true = mort
+    bool CheckSelfCollision();
+    Apple *CheckAppleCollision(std::vector<Apple> &apples);
+
+    void tryEnqueueDirection(SNAKE_STATES newState, SNAKE_STATES opposite);
+
+    int getGridX() const { return gridX; }
+    int getGridY() const { return gridY; }
+
+    void reset();
+
+    SDL_FRect Frect = {(float)STARTING_X, (float)STARTING_Y, SNAKE_WIDTH, SNAKE_HEIGHT};
+
+    std::vector<SnakeCell> &getSnakeBody() { return this->SnakeBody; };
+    std::vector<SNAKE_STATES> &getQueue() { return this->queue; };
+
+    SNAKE_STATES &getCurentState() { return this->CurrentState; };
+
+private:
+    float moveCooldown = 0;
+    int gridX = STARTING_X, gridY = STARTING_Y;
+    int prevGridX = STARTING_X, prevGridY = STARTING_Y;
+
+    SNAKE_STATES CurrentState = SNAKE_STATES::RIGHT;
+
+    std::vector<SNAKE_STATES> queue;
+    std::vector<SnakeCell> SnakeBody;
+};
+
+class Game
+{
+public:
+    Game() {};
+
+    float restartCooldown = 0.0f;
+
+    bool Init(SDL_Renderer *renderer);
+    void Shutdown();
+
+    void PlaceApple(int amount);
+    void RemoveApple(Apple &_apple);
+
+    void ClearGame();
+    void Restart();
+    void render(SDL_Renderer *renderer);
+    void Handle(SDL_Renderer *renderer, float deltaTime);
+    void OnAppleIsEaten(Apple &apple);
+
+    bool saveHighScore();
+    bool loadHighScore();
+
+    void InGameUpdate(float deltaTime);
+
+    void UpdateCooldown(float deltaTime);
+
+    Snake &getSnake() { return snake; }
+    const Snake &getSnake() const { return snake; }
+
+    std::vector<Apple> &getApples() { return apples; }
+    const std::vector<Apple> &getApples() const { return apples; }
+
+    unsigned short int getScore() const { return Score; }
+    unsigned short int getMaxScore() const { return MaxScore; }
+    GAME_STATES getGameState() { return gameState; };
+
+    void drawScore(SDL_Renderer *renderer);
+    void drawApples(SDL_Renderer *renderer);
+    void drawSnake(SDL_Renderer *renderer);
+    void drawLines(SDL_Renderer *renderer);
+
+    void renderMenu(SDL_Renderer *renderer);
+    void renderDeadScreen(SDL_Renderer *renderer);
+
+    void setGameState(GAME_STATES s)
+    {
+        if (this->gameState != s)
+            this->gameState = s;
+    };
+
+    void resetMaxScore()
+    {
+        this->MaxScore = 0;
+    }
+
+    void increaseScore()
+    {
+        this->Score++;
+        if (this->Score > this->MaxScore)
+            this->MaxScore = this->Score;
+    };
+
+private:
+    Snake snake; // create the snake
     GAME_STATES gameState = GAME_STATES::IN_MENU;
-    Snake snake;
-
-    std::vector<Apple> apples;
-
-    SDL_Texture *appleTexture = nullptr;
-
-    unsigned int Score = 0;
 
     TTF_Font *Basicfont;
     TTF_Font *Smallfont;
     TTF_Font *Bigfont;
 
-    float restartCooldown = 0.0f;
+    SDL_Texture *appleTexture = nullptr;
+
+    std::vector<Apple> apples;
+
+    unsigned short int Score = 0; // min : 0
+                                  // max : 32 767
+    unsigned short int MaxScore = 0;
 };
 
-// HELPERS
-
-inline bool checkGridCollision(int ax, int ay, int bx, int by)
+void Snake::Tick(float deltaTime)
 {
-    return ax == bx && ay == by;
+    this->moveCooldown += deltaTime;
+    if (this->moveCooldown > MOVE_INTERVAL)
+    {
+        this->moveCooldown -= MOVE_INTERVAL;
+
+        // on sauvegarde les positions avant déplacement
+        this->prevGridX = this->gridX;
+        this->prevGridY = this->gridY;
+
+        int prevX = this->gridX;
+        int prevY = this->gridY;
+
+        if (!this->queue.empty())
+        {
+            this->CurrentState = this->queue.front();
+            this->queue.erase(this->queue.begin());
+        }
+
+        // on bouge la tête
+        switch (this->CurrentState)
+        {
+        case SNAKE_STATES::RIGHT:
+            this->gridX += CELL_SIZE;
+            break;
+        case SNAKE_STATES::LEFT:
+            this->gridX -= CELL_SIZE;
+            break;
+
+        case SNAKE_STATES::UP:
+            this->gridY -= CELL_SIZE;
+            break;
+        case SNAKE_STATES::DOWN:
+            this->gridY += CELL_SIZE;
+            break;
+
+        default:
+            break;
+        }
+
+        for (auto &snakeCell : this->SnakeBody)
+        {
+            int currentX = snakeCell.gridX;
+            int currentY = snakeCell.gridY;
+
+            snakeCell.prevGridX = currentX;
+            snakeCell.prevGridY = currentY;
+
+            snakeCell.gridX = prevX;
+            snakeCell.gridY = prevY;
+
+            prevX = currentX;
+            prevY = currentY;
+        }
+    }
+
+    float t = this->moveCooldown / MOVE_INTERVAL;
+    float lerpedX = _lerp(this->prevGridX, this->gridX, t);
+    float lerpedY = _lerp(this->prevGridY, this->gridY, t);
+
+    this->Frect.x = lerpedX;
+    this->Frect.y = lerpedY;
+
+    for (auto &snakeCell : this->SnakeBody)
+    {
+        snakeCell.Frect.x = _lerp(snakeCell.prevGridX, snakeCell.gridX, t);
+        snakeCell.Frect.y = _lerp(snakeCell.prevGridY, snakeCell.gridY, t);
+    }
 }
 
-inline float lerp(float a, float b, float t)
+void Snake::grow(int amount)
 {
-    return a + (b - a) * t;
+    for (int i = 0; i < amount; i++)
+    {
+        int gridX;
+        int gridY;
+
+        if (!this->SnakeBody.empty())
+        {
+            SnakeCell lastCell = this->SnakeBody.back();
+            gridX = lastCell.gridX;
+            gridY = lastCell.gridY;
+        }
+        else
+        {
+            gridX = this->gridX;
+            gridY = this->gridY;
+        }
+
+        SnakeCell newCell;
+        newCell.gridX = gridX;
+        newCell.gridY = gridY;
+        newCell.prevGridX = gridX;
+        newCell.prevGridY = gridY;
+        newCell.Frect = {(float)gridX, (float)gridY, SNAKE_WIDTH, SNAKE_HEIGHT};
+
+        this->SnakeBody.push_back(newCell);
+    }
+}
+
+void Snake::tryEnqueueDirection(SNAKE_STATES newState, SNAKE_STATES opposite)
+{
+    // Si la queue est vide alors last = currentState
+    // Sinon on prend le dernier élément de la queue
+    SNAKE_STATES last = this->queue.empty() ? CurrentState : this->queue.back();
+
+    if (this->queue.size() < QUEUE_SIZE && last != opposite) // Si la queue n'est pas remplie ET que le dernier élément est différent de l'opposé on continue (pour éviter de pouvoir faire des demi-tours)
+        this->queue.push_back(newState);
+}
+
+void Snake::reset()
+{
+    if (!this->queue.empty())
+    {
+        this->queue.clear();
+    }
+    if (!this->SnakeBody.empty())
+    {
+        this->SnakeBody.clear();
+    }
+
+    this->CurrentState = SNAKE_STATES::RIGHT;
+    this->moveCooldown = 0;
+
+    this->gridX = STARTING_X;
+    this->gridY = STARTING_Y;
+
+    this->prevGridX = STARTING_X;
+    this->prevGridY = STARTING_Y;
+
+    this->Frect = {(float)STARTING_X, (float)STARTING_Y, SNAKE_WIDTH, SNAKE_HEIGHT};
+}
+
+// Snake Collisions
+bool Snake::CheckWallCollision()
+{
+    // Verticale
+
+    if (this->gridY < 0 || this->gridY >= HEIGHT)
+    {
+        return true;
+    }
+
+    // Horizontale
+    if (this->gridX < 0 || this->gridX >= WIDTH)
+    {
+        return true;
+    }
+
+    return false;
+}
+
+bool Snake::CheckSelfCollision()
+{
+    for (auto &snakeCell : this->SnakeBody)
+    {
+        if (snakeCell.prevGridX == this->gridX && snakeCell.prevGridY == this->gridY)
+        {
+            continue;
+        }
+
+        if (checkGridCollision(this->gridX, this->gridY, snakeCell.gridX, snakeCell.gridY))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+Apple *Snake::CheckAppleCollision(std::vector<Apple> &apples)
+{
+    for (auto &apple : apples)
+    {
+        if (checkGridCollision(this->gridX, this->gridY, apple.gridX, apple.gridY))
+        {
+            return &apple;
+        }
+    }
+
+    return nullptr;
+}
+
+// GAME LOGICS
+
+bool Game::Init(SDL_Renderer *renderer)
+{
+
+    this->Bigfont = TTF_OpenFont(FONT_PATH, 30.0f);
+    this->Basicfont = TTF_OpenFont(FONT_PATH, 22.0f);
+    this->Smallfont = TTF_OpenFont(FONT_PATH, 15.0f);
+
+    if (!this->Bigfont)
+    {
+        SDL_Log("Failed to load font: %s", SDL_GetError());
+        return false;
+    }
+    if (!this->Basicfont)
+    {
+        SDL_Log("Failed to load font: %s", SDL_GetError());
+        return false;
+    }
+    if (!this->Smallfont)
+    {
+        SDL_Log("Failed to load font: %s", SDL_GetError());
+        return false;
+    }
+
+    SDL_Surface *surface = IMG_Load(APPLE_PATH);
+
+    if (!surface)
+    {
+        return false;
+    }
+
+    this->appleTexture = SDL_CreateTextureFromSurface(renderer, surface);
+
+    SDL_DestroySurface(surface);
+
+    this->loadHighScore();
+    return true;
+}
+
+void Game::Shutdown()
+{
+    this->saveHighScore();
+    TTF_CloseFont(Basicfont);
+    TTF_CloseFont(Bigfont);
+    TTF_CloseFont(Smallfont);
+    SDL_DestroyTexture(appleTexture);
+}
+
+void Game::UpdateCooldown(float deltaTime)
+{
+    this->restartCooldown -= deltaTime;
+    if (this->restartCooldown < 0)
+        this->restartCooldown = 0;
+}
+
+void Game::InGameUpdate(float deltaTime)
+{
+    snake.Tick(deltaTime); // on bouge le snake
+
+    if (snake.CheckWallCollision() || snake.CheckSelfCollision())
+    {
+        setGameState(GAME_STATES::DEAD_SCREEN);
+        return;
+    }
+
+    Apple *eaten = snake.CheckAppleCollision(this->apples);
+    if (eaten)
+        OnAppleIsEaten(*eaten);
+}
+
+void Game::RemoveApple(Apple &_apple)
+{
+    for (int i = 0; i < this->apples.size(); i++)
+    {
+        if (this->apples[i].ID == _apple.ID)
+        {
+            this->apples.erase(this->apples.begin() + i);
+            break;
+        }
+    }
+}
+
+void Game::render(SDL_Renderer *renderer)
+{
+    drawLines(renderer);
+    drawSnake(renderer);
+    drawApples(renderer);
+    drawScore(renderer);
+}
+
+void Game::PlaceApple(int amount)
+{
+    int CellXAmount = WIDTH / CELL_SIZE;
+    int CellYAmount = HEIGHT / CELL_SIZE;
+
+    for (int i = 0; i < amount; i++)
+    {
+        int appleX;
+        int appleY;
+
+        int attemps = 0;
+
+        bool positionTaken = false;
+
+        do
+        {
+            attemps++;
+            appleX = (rand() % CellXAmount) * CELL_SIZE;
+            appleY = (rand() % CellYAmount) * CELL_SIZE;
+
+            positionTaken = false;
+
+            for (auto &cell : this->snake.getSnakeBody())
+            {
+                if (cell.gridX == appleX && cell.gridY == appleY) // position deja prise par une cell du snake
+                {
+                    positionTaken = true;
+                    break;
+                }
+            }
+
+            if (!positionTaken)
+            {
+                for (auto &apple : this->apples)
+                {
+                    if (apple.gridX == appleX && apple.gridY == appleY) // position deja prise par une autre pomme
+                    {
+                        positionTaken = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!positionTaken)
+            {
+                if (this->snake.getGridX() == appleX && this->snake.getGridY() == appleY) // position deja prise par la tête du snake
+                {
+                    positionTaken = true;
+                }
+            }
+
+        } while (positionTaken && attemps < MAX_ATTEMPTS);
+
+        if (!positionTaken)
+        {
+            int ID = this->apples.size() + 1;
+            this->apples.push_back({appleX, appleY, ID});
+        }
+    }
+}
+
+void Game::Handle(SDL_Renderer *renderer, float deltaTime)
+{
+    switch (this->gameState)
+    {
+    case GAME_STATES::IN_GAME:
+        this->InGameUpdate(deltaTime);
+        this->render(renderer);
+
+        break;
+
+    case GAME_STATES::IN_MENU:
+        this->renderMenu(renderer);
+        this->UpdateCooldown(deltaTime);
+        break;
+
+    case GAME_STATES::DEAD_SCREEN:
+
+        this->drawLines(renderer);
+        this->drawSnake(renderer);
+
+        this->renderDeadScreen(renderer);
+        this->UpdateCooldown(deltaTime);
+
+        break;
+
+    default:
+        break;
+    }
+}
+
+void Game::OnAppleIsEaten(Apple &apple)
+{
+    this->increaseScore();
+
+    this->RemoveApple(apple);
+    this->PlaceApple(1);
+
+    this->snake.grow(1);
+}
+
+void Game::ClearGame()
+{
+    snake.reset();
+
+    if (!this->apples.empty())
+    {
+        this->apples.clear();
+    }
+
+    this->Score = 0;
+}
+
+void Game::Restart()
+{
+    this->ClearGame();
+    this->gameState = GAME_STATES::IN_GAME;
+    this->PlaceApple(1);
 }
 
 // SCORE
+/*
 
-bool saveHighScore(int score)
+Score = 5
+Key = 3
+
+-> Save
+On vas save le score et le cheksum
+
+    Score   =       101     -    5
+    Key     =       011     -    3
+    ^               XOR
+    ChekSum =       110     -    6
+
+-> load
+    On a: Score & ChekSum
+
+    101
+    011
+    XOR
+    ChekSum
+
+    Si      Score XOR Key == ChekSum
+        on est sur que le score n'a pas été modifier
+*/
+
+bool Game::saveHighScore()
 {
-    int checksum = score ^ Key;
+    unsigned short int current_maxScore = this->MaxScore;
+    int checksum = current_maxScore ^ Key;
+
+    std::ofstream fileOut(DATA_PATH);
+    if (!fileOut)
+        return false;
+
+    fileOut << current_maxScore << " " << checksum;
+    fileOut.close();
+
+    return true;
 }
 
-int loadHighScore(int score, int checksum)
+bool Game::loadHighScore()
 {
-    if ((score ^ Key) == checksum)
+    std::ifstream dataFile(DATA_PATH); // pour lire dans le fichier
+
+    std::string data;
+    getline(dataFile, data);
+
+    int datascore = 0, datachecknum = 0;
+
+    if (!data.empty())
     {
-        // pas modif
+        std::istringstream iss(data);
+        iss >> datascore >> datachecknum; // extraire les 2 premiers int de la ligne
+    }
+
+    if ((datascore ^ Key) == datachecknum)
+    {
+        this->MaxScore = datascore;
     }
     else
     {
         // modif
+
+        this->MaxScore = 0;
+
+        std::ofstream fileOut(DATA_PATH); //  vide le fichier
+        fileOut.close();
     }
+
+    dataFile.close();
+    return true;
 }
 
 // DRAW
@@ -164,7 +701,7 @@ bool RenderLabel(SDL_Renderer *renderer, TTF_Font *font, std::string text, SDL_C
     return result;
 }
 
-void drawLines(SDL_Renderer *renderer)
+void Game::drawLines(SDL_Renderer *renderer)
 {
     SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
 
@@ -179,278 +716,38 @@ void drawLines(SDL_Renderer *renderer)
     }
 }
 
-void drawSnake(SDL_Renderer *renderer, Snake &snake)
+void Game::drawSnake(SDL_Renderer *renderer)
 {
     SDL_SetRenderDrawColor(renderer, 0, 250, 0, 255);
-    SDL_RenderFillRect(renderer, &snake.Frect);
+    SDL_RenderFillRect(renderer, &this->snake.Frect);
 
-    for (auto &snakeCell : snake.SnakeBody)
+    for (auto &snakeCell : this->snake.getSnakeBody())
     {
         SDL_RenderFillRect(renderer, &snakeCell.Frect);
     }
 }
 
-void drawApples(SDL_Renderer *renderer, Game &game)
+void Game::drawApples(SDL_Renderer *renderer)
 {
-    for (auto &apple : game.apples)
+    for (auto &apple : this->getApples())
     {
         SDL_FRect dest = {(float)apple.gridX, (float)apple.gridY, CELL_SIZE, CELL_SIZE};
-        SDL_RenderTexture(renderer, game.appleTexture, NULL, &dest);
+        SDL_RenderTexture(renderer, this->appleTexture, NULL, &dest);
     }
 }
 
-void drawScore(SDL_Renderer *renderer, Game &game)
+void Game::drawScore(SDL_Renderer *renderer)
 {
-    std::string Score = "Score: " + std::to_string(game.Score);
+    std::string Score = "Score: " + std::to_string(this->Score);
 
     SDL_Color color = {255, 255, 255, 255};
 
-    RenderLabel(renderer, game.Basicfont, Score, color, WIDTH / 2.0f, 30.0f);
-}
-
-// SNAKE
-
-void GrowSnake(Game &game, int amount)
-{
-    Snake &snake = game.snake;
-
-    for (int i = 0; i < amount; i++)
-    {
-        int gridX;
-        int gridY;
-
-        if (!snake.SnakeBody.empty())
-        {
-            SnakeCell lastCell = snake.SnakeBody.back();
-            gridX = lastCell.gridX;
-            gridY = lastCell.gridY;
-        }
-        else
-        {
-            gridX = snake.gridX;
-            gridY = snake.gridY;
-        }
-
-        SnakeCell newCell;
-        newCell.gridX = gridX;
-        newCell.gridY = gridY;
-        newCell.prevGridX = gridX;
-        newCell.prevGridY = gridY;
-        newCell.Frect = {(float)gridX, (float)gridY, SNAKE_WIDTH, SNAKE_HEIGHT};
-
-        snake.SnakeBody.push_back(newCell);
-    }
-}
-
-void updateSnake(Game &game, float deltaTime)
-{
-    Snake &snake = game.snake;
-
-    if (game.gameState != GAME_STATES::IN_GAME)
-    {
-        snake.moveCooldown = 0;
-        return;
-    }
-
-    snake.moveCooldown += deltaTime;
-    if (snake.moveCooldown > MOVE_INTERVAL)
-    {
-        snake.moveCooldown -= MOVE_INTERVAL;
-
-        // on sauvegarde les positions avant déplacement
-        snake.prevGridX = snake.gridX;
-        snake.prevGridY = snake.gridY;
-
-        int prevX = snake.gridX;
-        int prevY = snake.gridY;
-
-        if (!snake.queue.empty())
-        {
-            snake.CurrentState = snake.queue.front();
-            snake.queue.erase(snake.queue.begin());
-        }
-
-        // on bouge la tête
-        switch (snake.CurrentState)
-        {
-        case SNAKE_STATES::RIGHT:
-            snake.gridX += CELL_SIZE;
-            break;
-        case SNAKE_STATES::LEFT:
-            snake.gridX -= CELL_SIZE;
-            break;
-
-        case SNAKE_STATES::UP:
-            snake.gridY -= CELL_SIZE;
-            break;
-        case SNAKE_STATES::DOWN:
-            snake.gridY += CELL_SIZE;
-            break;
-
-        default:
-            break;
-        }
-
-        for (auto &snakeCell : snake.SnakeBody)
-        {
-            int currentX = snakeCell.gridX;
-            int currentY = snakeCell.gridY;
-
-            snakeCell.prevGridX = currentX;
-            snakeCell.prevGridY = currentY;
-
-            snakeCell.gridX = prevX;
-            snakeCell.gridY = prevY;
-
-            prevX = currentX;
-            prevY = currentY;
-        }
-    }
-
-    float t = snake.moveCooldown / MOVE_INTERVAL;
-    float lerpedX = lerp(snake.prevGridX, snake.gridX, t);
-    float lerpedY = lerp(snake.prevGridY, snake.gridY, t);
-
-    snake.Frect.x = lerpedX;
-    snake.Frect.y = lerpedY;
-
-    for (auto &snakeCell : snake.SnakeBody)
-    {
-        snakeCell.Frect.x = lerp(snakeCell.prevGridX, snakeCell.gridX, t);
-        snakeCell.Frect.y = lerp(snakeCell.prevGridY, snakeCell.gridY, t);
-    }
-}
-
-// APPLES
-
-void PlaceApple(Game &game, int amount)
-{
-    int CellXAmount = WIDTH / CELL_SIZE;
-    int CellYAmount = HEIGHT / CELL_SIZE;
-
-    for (int i = 0; i < amount; i++)
-    {
-        int appleX;
-        int appleY;
-
-        int attemps = 0;
-
-        bool positionTaken = false;
-
-        do
-        {
-            attemps++;
-            appleX = (rand() % CellXAmount) * CELL_SIZE;
-            appleY = (rand() % CellYAmount) * CELL_SIZE;
-
-            positionTaken = false;
-
-            for (auto &cell : game.snake.SnakeBody)
-            {
-                if (cell.gridX == appleX && cell.gridY == appleY) // position deja prise par une cell du snake
-                {
-                    positionTaken = true;
-                    break;
-                }
-            }
-
-            if (!positionTaken)
-            {
-                for (auto &apple : game.apples)
-                {
-                    if (apple.gridX == appleX && apple.gridY == appleY) // position deja prise par une autre pomme
-                    {
-                        positionTaken = true;
-                        break;
-                    }
-                }
-            }
-
-            if (!positionTaken)
-            {
-                if (game.snake.gridX == appleX && game.snake.gridY == appleY) // position deja prise par la tête du snake
-                {
-                    positionTaken = true;
-                }
-            }
-
-        } while (positionTaken && attemps < MAX_ATTEMPTS);
-
-        if (!positionTaken)
-        {
-            int ID = game.apples.size() + 1;
-            game.apples.push_back({appleX, appleY, ID});
-        }
-    }
-}
-
-void RemoveApple(Game &game, Apple &_apple)
-{
-    for (int i = 0; i < game.apples.size(); i++)
-    {
-        if (game.apples[i].ID == _apple.ID)
-        {
-            game.apples.erase(game.apples.begin() + i);
-            break;
-        }
-    }
-}
-
-void OnAppleIsEaten(Game &game, Apple &apple)
-{
-    apple.eaten = 1;
-    game.Score++;
-
-    RemoveApple(game, apple);
-
-    GrowSnake(game, 1);
-    PlaceApple(game, 1);
-}
-
-// COLLISIONS
-
-void HandleSnakeCollision(Game &game)
-{
-    Snake &snake = game.snake;
-    // collision sur les murs
-
-    // Verticale
-    if (snake.gridY < 0 || snake.gridY >= HEIGHT)
-    {
-        game.gameState = GAME_STATES::DEAD_SCREEN;
-    }
-
-    // Horizontale
-    if (snake.gridX < 0 || snake.gridX >= WIDTH)
-    {
-        game.gameState = GAME_STATES::DEAD_SCREEN;
-    }
-
-    for (auto &snakeCell : snake.SnakeBody)
-    {
-        if (snakeCell.prevGridX == snake.gridX && snakeCell.prevGridY == snakeCell.gridY)
-        {
-            continue;
-        }
-
-        if (checkGridCollision(snake.gridX, snake.gridY, snakeCell.gridX, snakeCell.gridY))
-        {
-            game.gameState = GAME_STATES::DEAD_SCREEN;
-        }
-    }
-
-    for (auto &apple : game.apples)
-    {
-        if (checkGridCollision(snake.gridX, snake.gridY, apple.gridX, apple.gridY) && !apple.eaten)
-        {
-            OnAppleIsEaten(game, apple);
-        }
-    }
+    RenderLabel(renderer, this->Basicfont, Score, color, WIDTH / 2.0f, 30.0f);
 }
 
 // RENDER
 
-void renderDeadScreen(SDL_Renderer *renderer)
+void Game::renderDeadScreen(SDL_Renderer *renderer)
 {
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND); // pour pouvoir voir à travers les pixels
 
@@ -458,111 +755,54 @@ void renderDeadScreen(SDL_Renderer *renderer)
     SDL_FRect overlay = {0.0f, 0.0f, WIDTH + 10, HEIGHT + 10};
     SDL_RenderFillRect(renderer, &overlay);
 
-    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    SDL_RenderDebugText(renderer, WIDTH / 2, HEIGHT / 2, "GAME OVER");
+    SDL_Color green = {74, 222, 128, 255};
+    SDL_Color red = {255, 0, 0, 255};
+    SDL_Color white = {255, 255, 255, 255};
 
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    RenderLabel(renderer, this->Bigfont, "GAME OVER", red,
+                WIDTH / 2.0f, HEIGHT / 2.0f - 120.0f);
+
+    auto maxScore = this->MaxScore;
+    auto Score = this->Score;
+
+    std::string Scorestr = "Score: " + std::to_string(Score);
+    std::string MaxScorestr = "Max: " + std::to_string(maxScore);
+
+    std::string str = Scorestr + "   " + MaxScorestr;
+
+    RenderLabel(renderer, this->Smallfont, str, white,
+                WIDTH / 2.0f, HEIGHT / 2.0f);
+
+    RenderLabel(renderer, this->Smallfont, "PRESS SPACE TO RETURN TO MENU", white,
+                WIDTH / 2.0f, HEIGHT - 50.0f);
+    RenderLabel(renderer, this->Smallfont, "PRESS ENTER TO CONTINUE", white,
+                WIDTH / 2.0f, HEIGHT - 80.0f);
 }
 
-void renderMenu(SDL_Renderer *renderer, Game &game)
+void Game::renderMenu(SDL_Renderer *renderer)
 {
     SDL_SetRenderDrawColor(renderer, 10, 10, 10, 255);
-    SDL_RenderClear(renderer);
 
     SDL_Color green = {74, 222, 128, 255};
     SDL_Color greenDark = {22, 163, 74, 255};
-    SDL_Color white = {255, 255, 255, 80};
+    SDL_Color grey = {255, 255, 255, 80};
+    SDL_Color white = {255, 255, 255, 255};
 
-    RenderLabel(renderer, game.Bigfont, "SNAKE", green,
+    RenderLabel(renderer, this->Bigfont, "SNAKE", green,
                 WIDTH / 2.0f, HEIGHT / 2.0f - 120.0f);
 
     SDL_SetRenderDrawColor(renderer, 22, 163, 74, 255);
     SDL_FRect line = {WIDTH / 2.0f - 40, HEIGHT / 2.0f - 95, 80, 2};
     SDL_RenderFillRect(renderer, &line);
 
-    RenderLabel(renderer, game.Smallfont, "PRESS ENTER TO PLAY", white,
+    auto maxScore = this->getMaxScore();
+    std::string maxScorestr = "Max Score: " + std::to_string(maxScore);
+
+    RenderLabel(renderer, this->Smallfont, maxScorestr, white,
+                WIDTH / 2.0f, HEIGHT / 2.0f);
+
+    RenderLabel(renderer, this->Smallfont, "PRESS ENTER TO PLAY", grey,
                 WIDTH / 2.0f, HEIGHT - 50.0f);
-}
-// GAME
-
-void ClearGame(Game &game)
-{
-    Snake &snake = game.snake;
-
-    if (!snake.queue.empty())
-    {
-        snake.queue.clear();
-    }
-    if (!snake.SnakeBody.empty())
-    {
-        snake.SnakeBody.clear();
-    }
-
-    if (!game.apples.empty())
-    {
-        game.apples.clear();
-    }
-
-    game.Score = 0;
-
-    snake.CurrentState = SNAKE_STATES::RIGHT;
-
-    snake.gridX = STARTING_X;
-    snake.gridY = STARTING_Y;
-
-    snake.prevGridX = STARTING_X;
-    snake.prevGridY = STARTING_Y;
-
-    snake.Frect = {(float)STARTING_X, (float)STARTING_Y, SNAKE_WIDTH, SNAKE_HEIGHT};
-}
-
-void Restart(Game &game)
-{
-    ClearGame(game);
-    game.gameState = GAME_STATES::IN_GAME;
-    PlaceApple(game, 1);
-}
-
-void HandleGame(Game &game, SDL_Renderer *renderer, float deltaTime)
-{
-    GAME_STATES &gameState = game.gameState;
-    Snake &snake = game.snake;
-
-    switch (gameState)
-    {
-    case GAME_STATES::IN_GAME:
-
-        drawLines(renderer);
-        updateSnake(game, deltaTime);
-        HandleSnakeCollision(game);
-        drawSnake(renderer, snake);
-        drawApples(renderer, game);
-        drawScore(renderer, game);
-
-        break;
-
-    case GAME_STATES::IN_MENU:
-        renderMenu(renderer, game);
-
-        game.restartCooldown -= deltaTime;
-        if (game.restartCooldown < 0)
-            game.restartCooldown = 0;
-
-        break;
-
-    case GAME_STATES::DEAD_SCREEN:
-        drawLines(renderer);
-        drawSnake(renderer, snake);
-        renderDeadScreen(renderer);
-
-        game.restartCooldown -= deltaTime;
-        if (game.restartCooldown < 0)
-            game.restartCooldown = 0;
-        break;
-
-    default:
-        break;
-    }
 }
 
 // MAIN
@@ -596,37 +836,13 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    TTF_Font *BigFont = TTF_OpenFont(FONT, 30.0f);
-    TTF_Font *BasicFont = TTF_OpenFont(FONT, 22.0f);
-    TTF_Font *SmallFont = TTF_OpenFont(FONT, 15.0f);
-
-    if (!BigFont)
-    {
-        SDL_Log("Failed to load font: %s", SDL_GetError());
-    }
-    if (!BasicFont)
-    {
-        SDL_Log("Failed to load font: %s", SDL_GetError());
-    }
-    if (!SmallFont)
-    {
-        SDL_Log("Failed to load font: %s", SDL_GetError());
-    }
-
     SDL_SetRenderVSync(renderer, 1);
 
-    // SDL_Surface *WindowSurface = SDL_GetWindowSurface(window);
     Game game;
-
-    game.Bigfont = BigFont;
-    game.Basicfont = BasicFont;
-    game.Smallfont = SmallFont;
-
-    SDL_Surface *surface = IMG_Load(APPLE_PATH);
-    game.appleTexture = SDL_CreateTextureFromSurface(renderer, surface);
-
-    SDL_DestroySurface(surface);
-
+    if (!game.Init(renderer))
+    {
+        return -1;
+    }
     Uint64 currentTime = SDL_GetTicks();
     Uint64 previousTime = currentTime;
     float deltaTime = 0.0f;
@@ -645,14 +861,14 @@ int main(int argc, char *argv[])
                 running = false;
             }
 
-            if (event.type == SDL_EVENT_KEY_DOWN && game.gameState == GAME_STATES::IN_MENU)
+            if (event.type == SDL_EVENT_KEY_DOWN && game.getGameState() == GAME_STATES::IN_MENU)
             {
                 switch (event.key.scancode)
                 {
                 case KEY_TO_START:
                     if (game.restartCooldown <= 0)
                     {
-                        Restart(game);
+                        game.Restart();
                         game.restartCooldown = 0.1f;
                     }
                     break;
@@ -662,14 +878,14 @@ int main(int argc, char *argv[])
                 }
             }
 
-            else if (event.type == SDL_EVENT_KEY_DOWN && game.gameState == GAME_STATES::DEAD_SCREEN)
+            else if (event.type == SDL_EVENT_KEY_DOWN && game.getGameState() == GAME_STATES::DEAD_SCREEN)
             {
                 switch (event.key.scancode)
                 {
                 case KEY_TO_CONTINUE:
                     if (game.restartCooldown <= 0)
                     {
-                        Restart(game);
+                        game.Restart();
                         game.restartCooldown = 0.1f;
                     }
                     break;
@@ -677,8 +893,8 @@ int main(int argc, char *argv[])
                 case KEY_BACK_TO_MENU:
                     if (game.restartCooldown <= 0)
                     {
-                        ClearGame(game);
-                        game.gameState = GAME_STATES::IN_MENU;
+                        game.ClearGame();
+                        game.setGameState(GAME_STATES::IN_MENU);
                         game.restartCooldown = 0.1f;
                     }
                     break;
@@ -687,42 +903,22 @@ int main(int argc, char *argv[])
                 }
             }
 
-            else if (event.type == SDL_EVENT_KEY_DOWN && game.gameState == GAME_STATES::IN_GAME)
+            else if (event.type == SDL_EVENT_KEY_DOWN && game.getGameState() == GAME_STATES::IN_GAME)
             {
                 switch (event.key.scancode)
                 {
                 case SDL_SCANCODE_UP:
-                {
-                    SNAKE_STATES last = game.snake.queue.empty() ? game.snake.CurrentState : game.snake.queue.back();
-
-                    // Si la queue est vide alors last = currentState
-                    // Sinon on prend le dernier élément de la queue
-
-                    if (game.snake.queue.size() < QUEUE_SIZE && last != SNAKE_STATES::DOWN) // Si la queue n'est pas remplie ET que le dernier élément est différent de DOWN on continue (pour éviter de pouvoir faire des demi-tours)
-                        game.snake.queue.push_back(SNAKE_STATES::UP);
+                    game.getSnake().tryEnqueueDirection(SNAKE_STATES::UP, SNAKE_STATES::DOWN);
                     break;
-                }
                 case SDL_SCANCODE_DOWN:
-                {
-                    SNAKE_STATES last = game.snake.queue.empty() ? game.snake.CurrentState : game.snake.queue.back();
-                    if (game.snake.queue.size() < QUEUE_SIZE && last != SNAKE_STATES::UP)
-                        game.snake.queue.push_back(SNAKE_STATES::DOWN);
+                    game.getSnake().tryEnqueueDirection(SNAKE_STATES::DOWN, SNAKE_STATES::UP);
                     break;
-                }
                 case SDL_SCANCODE_LEFT:
-                {
-                    SNAKE_STATES last = game.snake.queue.empty() ? game.snake.CurrentState : game.snake.queue.back();
-                    if (game.snake.queue.size() < QUEUE_SIZE && last != SNAKE_STATES::RIGHT)
-                        game.snake.queue.push_back(SNAKE_STATES::LEFT);
+                    game.getSnake().tryEnqueueDirection(SNAKE_STATES::LEFT, SNAKE_STATES::RIGHT);
                     break;
-                }
                 case SDL_SCANCODE_RIGHT:
-                {
-                    SNAKE_STATES last = game.snake.queue.empty() ? game.snake.CurrentState : game.snake.queue.back();
-                    if (game.snake.queue.size() < QUEUE_SIZE && last != SNAKE_STATES::LEFT)
-                        game.snake.queue.push_back(SNAKE_STATES::RIGHT);
+                    game.getSnake().tryEnqueueDirection(SNAKE_STATES::RIGHT, SNAKE_STATES::LEFT);
                     break;
-                }
                 default:
                     break;
                 }
@@ -732,15 +928,17 @@ int main(int argc, char *argv[])
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // fond noir
         SDL_RenderClear(renderer);
 
-        HandleGame(game, renderer, deltaTime);
+        game.Handle(renderer, deltaTime);
 
         SDL_RenderPresent(renderer);
     }
 
-    SDL_DestroyTexture(game.appleTexture);
+    game.Shutdown();
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
+
+    TTF_Quit();
     SDL_Quit();
     return 0;
 }
