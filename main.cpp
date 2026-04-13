@@ -34,7 +34,7 @@
 #define MAX_ATTEMPTS (WIDTH / CELL_SIZE) * (HEIGHT / CELL_SIZE)
 
 #define KEY_TO_START SDL_SCANCODE_RETURN    // pour lancer le jeu (menu)
-#define KEY_TO_CONTINUE SDL_SCANCODE_RETURN // pour continuer (Dead Screen)
+#define KEY_TO_CONTINUE SDL_SCANCODE_RETURN // pour continuer (écran de mort)
 #define KEY_BACK_TO_MENU SDL_SCANCODE_SPACE // pour retourner au menu
 
 // ENUMS
@@ -189,7 +189,7 @@ public:
     };
 
 private:
-    Snake snake; // create the snake
+    Snake snake; // création du snake
     GAME_STATES gameState = GAME_STATES::IN_MENU;
 
     TTF_Font *Basicfont;
@@ -225,7 +225,7 @@ void Snake::Tick(float deltaTime)
             this->queue.erase(this->queue.begin());
         }
 
-        // on bouge la tête
+        // on déplace la tête
         switch (this->CurrentState)
         {
         case SNAKE_STATES::RIGHT:
@@ -339,7 +339,7 @@ void Snake::reset()
     this->Frect = {(float)STARTING_X, (float)STARTING_Y, SNAKE_WIDTH, SNAKE_HEIGHT};
 }
 
-// Snake Collisions
+// Collisions du Snake
 bool Snake::CheckWallCollision()
 {
     // Verticale
@@ -389,7 +389,7 @@ Apple *Snake::CheckAppleCollision(std::vector<Apple> &apples)
     return nullptr;
 }
 
-// GAME LOGICS
+// LOGIQUE DU JEU
 
 bool Game::Init(SDL_Renderer *renderer)
 {
@@ -447,7 +447,7 @@ void Game::UpdateCooldown(float deltaTime)
 
 void Game::InGameUpdate(float deltaTime)
 {
-    snake.Tick(deltaTime); // on bouge le snake
+    snake.Tick(deltaTime); // on déplace le snake
 
     if (snake.CheckWallCollision() || snake.CheckSelfCollision())
     {
@@ -504,7 +504,7 @@ void Game::PlaceApple(int amount)
 
             for (auto &cell : this->snake.getSnakeBody())
             {
-                if (cell.gridX == appleX && cell.gridY == appleY) // position deja prise par une cell du snake
+                if (cell.gridX == appleX && cell.gridY == appleY) // position déjà prise par une cellule du snake
                 {
                     positionTaken = true;
                     break;
@@ -515,7 +515,7 @@ void Game::PlaceApple(int amount)
             {
                 for (auto &apple : this->apples)
                 {
-                    if (apple.gridX == appleX && apple.gridY == appleY) // position deja prise par une autre pomme
+                    if (apple.gridX == appleX && apple.gridY == appleY) // position déjà prise par une autre pomme
                     {
                         positionTaken = true;
                         break;
@@ -525,7 +525,7 @@ void Game::PlaceApple(int amount)
 
             if (!positionTaken)
             {
-                if (this->snake.getGridX() == appleX && this->snake.getGridY() == appleY) // position deja prise par la tête du snake
+                if (this->snake.getGridX() == appleX && this->snake.getGridY() == appleY) // position déjà prise par la tête du snake
                 {
                     positionTaken = true;
                 }
@@ -606,24 +606,24 @@ void Game::Restart()
 Score = 5
 Key = 3
 
--> Save
-On vas save le score et le cheksum
+-> Sauvegarde
+On va sauvegarder le score et le checksum
 
     Score   =       101     -    5
     Key     =       011     -    3
     ^               XOR
-    ChekSum =       110     -    6
+    CheckSum =      110     -    6
 
--> load
-    On a: Score & ChekSum
+-> Chargement
+    On a : Score & CheckSum
 
     101
     011
     XOR
-    ChekSum
+    CheckSum
 
-    Si      Score XOR Key == ChekSum
-        on est sur que le score n'a pas été modifier
+    Si      Score XOR Key == CheckSum
+        on est sûr que le score n'a pas été modifié
 */
 
 bool Game::saveHighScore()
@@ -662,11 +662,11 @@ bool Game::loadHighScore()
     }
     else
     {
-        // modif
+        // modification
 
         this->MaxScore = 0;
 
-        std::ofstream fileOut(DATA_PATH); //  vide le fichier
+        std::ofstream fileOut(DATA_PATH); // vide le fichier
         fileOut.close();
     }
 
@@ -674,7 +674,7 @@ bool Game::loadHighScore()
     return true;
 }
 
-// DRAW
+// AFFICHAGE
 bool RenderLabel(SDL_Renderer *renderer, TTF_Font *font, std::string text, SDL_Color color, float x, float y)
 {
     SDL_Surface *Surface = TTF_RenderText_Blended(font, text.c_str(), text.size(), color);
@@ -745,7 +745,7 @@ void Game::drawScore(SDL_Renderer *renderer)
     RenderLabel(renderer, this->Basicfont, Score, color, WIDTH / 2.0f, 30.0f);
 }
 
-// RENDER
+// RENDU
 
 void Game::renderDeadScreen(SDL_Renderer *renderer)
 {
