@@ -742,6 +742,11 @@ void Game::drawScore(SDL_Renderer *renderer)
 
     SDL_Color color = {255, 255, 255, 255};
 
+    if (this->Score >= this->MaxScore)
+    {
+        color = {255, 255, 0, 255};
+    }
+
     RenderLabel(renderer, this->Basicfont, Score, color, WIDTH / 2.0f, 30.0f);
 }
 
